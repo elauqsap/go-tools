@@ -18,4 +18,6 @@ Icon
 # Other
 # ------------------
 *.csv
+*.txt
 batch-csv-parser
+other/*

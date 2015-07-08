@@ -17,6 +17,8 @@ Icon
 # ------------------
 # Other
 # ------------------
+*.exe
+*.zip
 *.csv
 *.txt
 batch-csv-parser

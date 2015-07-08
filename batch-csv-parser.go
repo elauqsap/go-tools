@@ -13,8 +13,9 @@ import (
 
 var loc, reg string
 var col, max int
-var done = make(chan bool)      // boolean channel to end the consumer loop
-var matches = make(chan string) // channel for processing regex matches
+var done = make(chan bool)        // boolean channel to end the consumer loop
+var matches = make(chan []string) // channel for processing regex matches
+var stats chan []string
 var top = make([]int, 0, 25)
 var only = make([]int, 0, 25)
 
@@ -38,6 +39,14 @@ func init() {
 
 func main() {
 	options()
+	go produce(readCSV(loc))
+	go consumeMatches()
+	if len(top) != 0 {
+		fmt.Println("CONDITION")
+		stats = make(chan []string, 1024)
+		go process()
+	}
+	<-done
 }
 
 func options() {
@@ -45,12 +54,12 @@ func options() {
 	cli := regexp.MustCompile(`(--help|--ver|--top ([1-9][0-9]? ?)+|--only ([1-9][0-9]? ?)+|--col [1-9][0-9]?|--max [1-9][0-9]?|--loc (\/.*\/.*\.csv|.*\.csv|\/.*\/)|--reg [^\s]+)`)
 	matches := cli.FindAllString(join, -1)
 
+	if len(matches) == 0 {
+		fmt.Println(os.Args[0] + " --help for details")
+		os.Exit(0)
+	}
+
 	for _, match := range matches {
-		if debug {
-			log.WithFields(log.Fields{
-				"match": match,
-			}).Debug("CLI Arguments")
-		}
 		args := strings.Split(strings.TrimSpace(match), " ")
 		switch args[0] {
 		case "--help":
@@ -82,8 +91,52 @@ func options() {
 				os.Args[0] + " --help for details")
 			os.Exit(0)
 		}
+		if debug {
+			log.WithFields(log.Fields{
+				"match": match,
+			}).Debug("CLI Arguments")
+		}
 	}
 
+}
+
+func produce(entries [][]string) {
+	regex, err := regexp.Compile(reg)
+	if err != nil {
+		log.Error(reg + ", is not a valid regular expression")
+	} else {
+		if len(top) != 0 {
+			go process()
+			<-done
+		}
+		for _, each := range entries {
+			if regex.MatchString(each[col]) {
+				matches <- each
+				if stats != nil {
+					stats <- each
+				}
+			}
+		}
+	}
+	done <- true
+}
+
+func consumeMatches() {
+	for {
+		match := <-matches
+		if len(match) != 0 {
+			fmt.Println("MATCH: " + match[0])
+		}
+	}
+}
+
+func process() {
+	for {
+		stat := <-stats
+		if len(stat) != 0 {
+			fmt.Println("STAT: " + stat[0])
+		}
+	}
 }
 
 func str2int(opt string, str string) (x int) {
@@ -107,24 +160,10 @@ func exists(path string) bool {
 	return true
 }
 
-func produceMatches(entries [][]string) {
-	for _, each := range entries {
-		matches <- each[0]
-	}
-	done <- true
-}
-
-func consumeMatches() {
-	for {
-		match := <-matches
-		fmt.Println(match)
-	}
-}
-
-func readCSV() [][]string {
-	csvFile, err := os.Open(loc)
+func readCSV(location string) [][]string {
+	csvFile, err := os.Open(location)
 	if err != nil {
-		fmt.Println("Unable to open the ")
+		fmt.Println("Unable to open: " + location)
 		os.Exit(1)
 	}
 	defer csvFile.Close()
@@ -132,6 +171,7 @@ func readCSV() [][]string {
 	reader := csv.NewReader(csvFile)
 	reader.FieldsPerRecord = -1
 	data, err := reader.ReadAll()
+	fmt.Println(data[0])
 	if err != nil {
 		fmt.Println("Unable to parse the CSV file, make sure it is a valid CSV")
 		os.Exit(1)

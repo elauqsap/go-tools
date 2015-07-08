@@ -18,6 +18,7 @@ var matches = make(chan []string) // channel for processing regex matches
 var stats chan []string
 var top = make([]int, 0, 25)
 var only = make([]int, 0, 25)
+var maps = make(map[int]map[string]int)
 
 const debug = true
 const version = "batch-csv-parser v0.1.0 (c) Pasquale D'Agostino"
@@ -40,11 +41,10 @@ func init() {
 func main() {
 	options()
 	go produce(readCSV(loc))
-	go consumeMatches()
+	go process()
 	if len(top) != 0 {
-		fmt.Println("CONDITION")
 		stats = make(chan []string, 1024)
-		go process()
+		go statistics()
 	}
 	<-done
 }
@@ -105,10 +105,6 @@ func produce(entries [][]string) {
 	if err != nil {
 		log.Error(reg + ", is not a valid regular expression")
 	} else {
-		if len(top) != 0 {
-			go process()
-			<-done
-		}
 		for _, each := range entries {
 			if regex.MatchString(each[col]) {
 				matches <- each
@@ -121,22 +117,30 @@ func produce(entries [][]string) {
 	done <- true
 }
 
-func consumeMatches() {
+func process() {
 	for {
 		match := <-matches
 		if len(match) != 0 {
-			fmt.Println("MATCH: " + match[0])
+			//sfmt.Println("MATCH: " + match[0])
 		}
 	}
 }
 
-func process() {
+func statistics() {
 	for {
 		stat := <-stats
 		if len(stat) != 0 {
-			fmt.Println("STAT: " + stat[0])
+			for _, each := range top {
+				fmt.Println(count(stat, each))
+			}
 		}
 	}
+}
+
+func count(str []string, col int) map[string]int {
+	ret := make(map[string]int)
+	(ret[str[col]])++
+	return ret
 }
 
 func str2int(opt string, str string) (x int) {

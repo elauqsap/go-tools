@@ -1,24 +1,33 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	log "github.com/Sirupsen/logrus"
 )
 
+var header []string
 var loc, reg string
-var col, max int
+var col, max = 0, 10
+var out = false
+
+var stats chan []string           // channel for producing stats, init if flag
 var done = make(chan bool)        // boolean channel to end the consumer loop
 var matches = make(chan []string) // channel for processing regex matches
-var stats chan []string
+
 var top = make([]int, 0, 25)
 var only = make([]int, 0, 25)
+
 var maps = make(map[int]map[string]int)
+var mutex = &sync.Mutex{}
 
 const debug = true
 const version = "batch-csv-parser v0.1.0 (c) Pasquale D'Agostino"
@@ -29,9 +38,41 @@ const usage = "Given a directory of CSV files and a column to match on" +
 	"where [options] are:\n" +
 	"\t --col <i>:\t Column to perform the regex match on\n" +
 	"\t --loc <s>:\t Path to the CSV file or directory of files\n" +
+	"\t --max <i>:\t Number of top values to print (default: 10)" +
+	"\t --only <i+>:\t Columns to only print from the CSV" +
+	"\t --out <b>:\t Flag to write to CSV instead of stdout" +
 	"\t --reg <s>:\t Regex to match on the provided column (needs to be last argument)\n" +
-	"\t --top <i+>:\t Columns to provide top occurances\n" +
-	"\t --max <i>:\t Number of top values to print (default: 10)"
+	"\t --top <i+>:\t Columns to provide top occurances\n"
+
+type sortedMap struct {
+	m map[string]int
+	s []string
+}
+
+func (sm *sortedMap) Len() int {
+	return len(sm.m)
+}
+
+func (sm *sortedMap) Less(i, j int) bool {
+	return sm.m[sm.s[i]] > sm.m[sm.s[j]]
+}
+
+func (sm *sortedMap) Swap(i, j int) {
+	sm.s[i], sm.s[j] = sm.s[j], sm.s[i]
+}
+
+func sortedKeys(m map[string]int) []string {
+	sm := new(sortedMap)
+	sm.m = m
+	sm.s = make([]string, len(m))
+	i := 0
+	for key := range m {
+		sm.s[i] = key
+		i++
+	}
+	sort.Sort(sm)
+	return sm.s
+}
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
@@ -40,6 +81,8 @@ func init() {
 
 func main() {
 	options()
+	fmt.Println(top)
+	fmt.Println(only)
 	go produce(readCSV(loc))
 	go process()
 	if len(top) != 0 {
@@ -47,11 +90,12 @@ func main() {
 		go statistics()
 	}
 	<-done
+	printStats()
 }
 
 func options() {
 	join := strings.Join(append(os.Args), " ")
-	cli := regexp.MustCompile(`(--help|--ver|--top ([1-9][0-9]? ?)+|--only ([1-9][0-9]? ?)+|--col [1-9][0-9]?|--max [1-9][0-9]?|--loc (\/.*\/.*\.csv|.*\.csv|\/.*\/)|--reg [^\s]+)`)
+	cli := regexp.MustCompile(`(--help|--ver|--top (\d{1,2} ?)+|--only (\d{1,2} ?)+|--col (0|[1-9][0-9])?|--max [1-9][0-9]?|--loc (\/.*\/.*\.csv|.*\.csv|\/.*\/)|--reg [^\s]+|--out)`)
 	matches := cli.FindAllString(join, -1)
 
 	if len(matches) == 0 {
@@ -82,9 +126,11 @@ func options() {
 			}
 		case "--max":
 			max = str2int(args[0], args[1])
+		case "--out":
+			out = true
 		case "--only":
 			for _, each := range args[1:] {
-				only = append(top, str2int(args[0], each))
+				only = append(only, str2int(args[0], each))
 			}
 		default:
 			fmt.Println(args[0] + " is an invalid argument, see " +
@@ -121,7 +167,20 @@ func process() {
 	for {
 		match := <-matches
 		if len(match) != 0 {
-			//sfmt.Println("MATCH: " + match[0])
+			if out {
+
+			} else {
+				if len(only) != 0 {
+					var buffer bytes.Buffer
+					for _, entry := range only {
+						buffer.WriteString(match[entry] + ",")
+					}
+					fmt.Println(strings.TrimSuffix(buffer.String(), ","))
+				} else {
+					str := strings.Join(blanks(match), ",")
+					fmt.Println(strings.TrimSuffix(str, ","))
+				}
+			}
 		}
 	}
 }
@@ -131,16 +190,38 @@ func statistics() {
 		stat := <-stats
 		if len(stat) != 0 {
 			for _, each := range top {
-				fmt.Println(count(stat, each))
+				if maps[each] == nil {
+					maps[each] = make(map[string]int)
+				}
+				(maps[each][stat[each]])++
 			}
 		}
 	}
 }
 
-func count(str []string, col int) map[string]int {
-	ret := make(map[string]int)
-	(ret[str[col]])++
-	return ret
+func print(str string) {
+	fmt.Println(str)
+}
+
+func printStats() {
+	print("")
+	print("############### TOP ###############")
+	print("")
+	for key, values := range maps {
+		print(header[key])
+		if max >= len(values) {
+			for _, res := range sortedKeys(values) {
+				print(strconv.Itoa(values[res]) + "\t" + res)
+			}
+			print("")
+		} else {
+			for _, res := range sortedKeys(values)[:max] {
+				print(strconv.Itoa(values[res]) + "\t" + res)
+			}
+			print("")
+		}
+	}
+	print("############### END ###############")
 }
 
 func str2int(opt string, str string) (x int) {
@@ -150,6 +231,16 @@ func str2int(opt string, str string) (x int) {
 		os.Exit(2)
 	}
 	return x
+}
+
+func blanks(s []string) []string {
+	var r []string
+	for _, str := range s {
+		if str != "" {
+			r = append(r, str)
+		}
+	}
+	return r
 }
 
 func exists(path string) bool {
@@ -165,17 +256,17 @@ func exists(path string) bool {
 }
 
 func readCSV(location string) [][]string {
-	csvFile, err := os.Open(location)
+	readfile, err := os.Open(location)
 	if err != nil {
 		fmt.Println("Unable to open: " + location)
 		os.Exit(1)
 	}
-	defer csvFile.Close()
+	defer readfile.Close()
 
-	reader := csv.NewReader(csvFile)
+	reader := csv.NewReader(readfile)
 	reader.FieldsPerRecord = -1
 	data, err := reader.ReadAll()
-	fmt.Println(data[0])
+	header = data[0]
 	if err != nil {
 		fmt.Println("Unable to parse the CSV file, make sure it is a valid CSV")
 		os.Exit(1)

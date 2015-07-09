@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	log "github.com/Sirupsen/logrus"
 )
@@ -27,9 +26,8 @@ var top = make([]int, 0, 25)
 var only = make([]int, 0, 25)
 
 var maps = make(map[int]map[string]int)
-var mutex = &sync.Mutex{}
 
-const debug = true
+const debug = false
 const version = "batch-csv-parser v0.1.0 (c) Pasquale D'Agostino"
 const usage = "Given a directory of CSV files and a column to match on" +
 	" a regular expression, this program will print the matches to standard out.\n" +
@@ -38,11 +36,11 @@ const usage = "Given a directory of CSV files and a column to match on" +
 	"where [options] are:\n" +
 	"\t --col <i>:\t Column to perform the regex match on\n" +
 	"\t --loc <s>:\t Path to the CSV file or directory of files\n" +
-	"\t --max <i>:\t Number of top values to print (default: 10)" +
-	"\t --only <i+>:\t Columns to only print from the CSV" +
-	"\t --out <b>:\t Flag to write to CSV instead of stdout" +
+	"\t --max <i>:\t Number of top values to print (default: 10)\n" +
+	"\t --only <i+>:\t Columns to only print from the CSV\n" +
+	"\t --out <b>:\t Flag to write to CSV instead of stdout\n" +
 	"\t --reg <s>:\t Regex to match on the provided column (needs to be last argument)\n" +
-	"\t --top <i+>:\t Columns to provide top occurances\n"
+	"\t --top <i+>:\t Columns to provide top occurances"
 
 type sortedMap struct {
 	m map[string]int
@@ -81,8 +79,6 @@ func init() {
 
 func main() {
 	options()
-	fmt.Println(top)
-	fmt.Println(only)
 	go produce(readCSV(loc))
 	go process()
 	if len(top) != 0 {

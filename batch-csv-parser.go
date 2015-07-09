@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,6 +18,7 @@ var header []string
 var loc, reg string
 var col, max = 0, 10
 var out = false
+var dir = false
 
 var stats chan []string           // channel for producing stats, init if flag
 var done = make(chan bool)        // boolean channel to end the consumer loop
@@ -79,19 +81,30 @@ func init() {
 
 func main() {
 	options()
-	go produce(readCSV(loc))
+	if dir {
+		files, _ := filepath.Glob(loc + "*.csv")
+		for _, file := range files {
+			run(file)
+		}
+	} else {
+		run(loc)
+	}
+	printStats()
+}
+
+func run(file string) {
+	go produce(readCSV(file))
 	go process()
 	if len(top) != 0 {
 		stats = make(chan []string, 1024)
 		go statistics()
 	}
 	<-done
-	printStats()
 }
 
 func options() {
 	join := strings.Join(append(os.Args), " ")
-	cli := regexp.MustCompile(`(--help|--ver|--top (\d{1,2} ?)+|--only (\d{1,2} ?)+|--col (0|[1-9][0-9])?|--max [1-9][0-9]?|--loc (\/.*\/.*\.csv|.*\.csv|\/.*\/)|--reg [^\s]+|--out)`)
+	cli := regexp.MustCompile(`(--help|--ver|--top (\d{1,2} ?)+|--only (\d{1,2} ?)+|--col (0|[1-9][0-9])?|--max [1-9][0-9]?|--loc (\/.*\/.*\.csv|.*\.csv|\/.*\/|[a-zA-Z0-9\-]+\/)|--reg [^\s]+|--out)`)
 	matches := cli.FindAllString(join, -1)
 
 	if len(matches) == 0 {
@@ -240,8 +253,11 @@ func blanks(s []string) []string {
 }
 
 func exists(path string) bool {
-	_, err := os.Stat(path)
+	src, err := os.Stat(path)
 	if err == nil {
+		if src.IsDir() {
+			dir = true
+		}
 		return true
 	}
 	if os.IsNotExist(err) {

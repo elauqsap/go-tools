@@ -1,9 +1,9 @@
-// Package sortedmap contains utility functions for
+// Package sortedmap contains utility functions for sort
 package sortedmap
 
 import "sort"
 
-// SortedMap
+// SortedMap struct
 type SortedMap struct {
 	m map[string]int
 	s []string
@@ -21,9 +21,7 @@ func (sm *SortedMap) Swap(i, j int) {
 	sm.s[i], sm.s[j] = sm.s[j], sm.s[i]
 }
 
-/*
-SortedKeys dadadad
-*/
+// SortedKeys takes a map and reverse orders the keys
 func SortedKeys(m map[string]int) []string {
 	sm := new(SortedMap)
 	sm.m = m
